@@ -65,11 +65,12 @@ So is a list of facts, a fact can be defined like this
 ...     deleted: bool
 ...     source: str
 ...     used: bool
+...     user: Optional[str]
 
 ```
 
-To parse a respone you call `parse_dc`, where `dc` stands for dataclass. You call it
-with the dataclass and the response data:
+To parse a respone you call `parse_dc`, where `dc` stands for dataclass. You
+call it with the dataclass and the response data:
 
 ```python
 >>> import requests as r
@@ -78,18 +79,33 @@ with the dataclass and the response data:
 >>> parse_dc(Fact, res.json())
 Traceback (most recent call last):
 ...
-TypeError: Unknow field type for Fact. Expected one of (_id,_Fact__v,text,updatedAt,deleted,source,used)
+TypeError: Unknow field type for Fact. Expected one of (_id,_Fact__v,text,updatedAt,deleted,source,used,user)
 
 ```
 
-What happens here is that the documentation is outdated, there are a type field that was not expected
-in response. `parse_dc` raise a TypeError if anything goes out of rails. Let's see in response what we
-have in `type` field
+You may notice that I put a `user: Optional[str]` on the `Fact` definition too.
+This is how you express optional fields, that may or may not be present on
+response. Missing optinal fields become `None` in dataclass
+
+What happens here is that the documentation is outdated, there are a type field
+that was not expected in response. `parse_dc` raise a TypeError if anything
+goes out of rails. Let's see in response what we have in `type` field
 ```python
 >>> type_ = res.json()['type']
 >>> type_, type(type_)
 ('cat', <class 'str'>)
 
+```
+
+This may happen again and again. Some APIs are freaking crazy, they may add
+some fields in some responses and another not. If you pass
+`,ignore_unknows=True)` to `parse_dc` it will not raise type errors if an
+unexpected field arrives. If you want this behavior by default you can memoise
+`parse_dc` as
+
+```python
+from functools import partial
+parse_dc = partial(parse_dc, ignore_unknows=True)
 ```
 
 So let's update our `Fact` definition
@@ -104,6 +120,7 @@ So let's update our `Fact` definition
 ...     deleted: bool
 ...     source: str
 ...     used: bool
+...     user: Optional[str]
 ...     type: str # <- we added this
 
 ```
@@ -140,7 +157,7 @@ here because I want to control the returned object not how it's initializated.
 ...     source: str
 ...     used: bool
 ...     type: str
-...     user: str
+...     user: Optional[str]
 ...     text: str
 ...
 >>> parse_dc(Fact, res.json())
@@ -221,16 +238,20 @@ by this
 Since datetimestr is a subtype of datetime it typechecks for datetime
 """
 
+import logging
 import re
 from typing import *
+from ast import literal_eval
 from dataclasses import dataclass, fields, is_dataclass
 
 try:
-    from typing_extensions import Protocol
+    from typing_extensions import Protocol, Literal
 except ImportError:
     pass
 
 T = TypeVar("T")
+
+log = logging.getLogger(__name__)
 
 
 class Dataclass(Protocol):
@@ -240,6 +261,7 @@ class Dataclass(Protocol):
     """
 
     __dataclass_fields__: Dict
+
 
 def create_base(base):
     """
@@ -259,12 +281,15 @@ def create_base(base):
 
     ```
     """
+
     def dec(func):
         class _TypeHelper(base):
             def __new__(cls, *args, **kwargs):
-                 return func(*args, **kwargs)
+                return func(*args, **kwargs)
+
         _TypeHelper.__name__ = func.__name__
         return _TypeHelper
+
     return dec
 
 
@@ -307,7 +332,7 @@ def unpack_union(union: Union[T, Any, None]) -> T:
         return union
 
 
-def parse_dc(cls: Dataclass, data: dict) -> Dataclass:
+def parse_dc(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
     """
     Given an arbitrary dataclass and a dict this function will
     recursively parse the data, checking data types against cls
@@ -335,7 +360,7 @@ def parse_dc(cls: Dataclass, data: dict) -> Dataclass:
     Now suppose that you get this data from a network response. I'm
     expecting it to be plain json parsed to dicts, lists and so on,
     but no objects, just decoded json:
-    
+
     ```python
     >>> data = {"foo": {"bar": 1}, "l": [], "Foo": {"name": 1}}
 
@@ -400,24 +425,30 @@ def parse_dc(cls: Dataclass, data: dict) -> Dataclass:
         # avoid python mangling
         k = re.sub(r"^__", f"_{cls.__name__}__", k)
         if k not in fields_:
-            raise TypeError(
-                "Unknow field {} for {}. Expected one of ({})".format(
-                    k, cls.__name__, ",".join(fields_.keys())
-                )
+            msg = "Unknow field {} for {}. Expected one of ({})".format(
+                k, cls.__name__, ",".join(fields_.keys())
             )
+            if not __debug__:
+                log.warning("%s", msg)
+            if ignore_unknows:
+                continue
+            raise TypeError(msg)
         if v is None:
             continue
         typev = fields_[k]
         is_literal = False
+        # @FIXME
+        # This code is bad, lift this to another
+        # function that returns the concrete_type
         if hasattr(typev, "__origin__"):
-            if typev.__origin__ is list:
+            if typev.__origin__ in (list, List):
                 concrete_typev = list
                 list_subtype = unpack_union(typev)
-            elif typev.__origin__ is dict:
+            elif typev.__origin__ in (dict, Dict):
                 concrete_typev = dict
                 dict_subtype_key = typev.__args__[0]
                 dict_subtype_val = typev.__args__[1]
-            elif typev.__origin__ is Union:
+            elif typev.__origin__ in (Union,):
                 concrete_typev = unpack_union(fields_[k])
             elif typev.__origin__ is Literal:
                 is_literal = True
@@ -427,8 +458,14 @@ def parse_dc(cls: Dataclass, data: dict) -> Dataclass:
                     f"Can't find a way to determine concrete type for {v}"
                 )
         else:
-            concrete_typev = typev
-
+            # typing_extensions.Literal has no __origin__
+            if str(typev).startswith("typing_extensions.Literal"):
+                is_literal = True
+                literals = literal_eval(
+                    str(typev).replace("typing_extensions.Literal", "")
+                )
+            else:
+                concrete_typev = typev
         scalar = (float, int, bool, str)
         if is_literal:
             if v not in literals:
@@ -462,7 +499,9 @@ def parse_dc(cls: Dataclass, data: dict) -> Dataclass:
                     f" in dataclass {cls.__name__} while trying to construct value from {concrete_typev.__name__}({repr(v)}): {e}"
                 ) from e
         else:
-            raise NotImplementedError("This should never happen, please open an issue with an stack trace")
+            raise NotImplementedError(
+                "This should never happen, please open an issue with an stack trace"
+            )
     try:
         return cls(**res)
     except TypeError as e:
@@ -470,6 +509,8 @@ def parse_dc(cls: Dataclass, data: dict) -> Dataclass:
             f"while calling {cls.__name__}(**data) with this data {data}: {e}"
         ) from e
 
+
 if __name__ == "__main__":
     import doctest
+
     doctest.testmod(optionflags=doctest.ELLIPSIS)
