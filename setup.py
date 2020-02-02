@@ -16,4 +16,7 @@ setup(
     long_description=README,
     long_description_content_type="text/markdown",
     license="Apache-2.0",
+    install_requires=[
+        'dataclasses;python_version<=3.6'
+    ]
 )
