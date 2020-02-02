@@ -225,6 +225,11 @@ import re
 from typing import *
 from dataclasses import dataclass, fields, is_dataclass
 
+try:
+    from typing_extensions import Protocol
+except ImportError:
+    pass
+
 T = TypeVar("T")
 
 
