@@ -88,7 +88,7 @@ is to wrap the problematic object in a class and override its constructor
 ... class Fact2:
 ...     _id: str
 ...     __v: int
-...     updatedAt: datetimestr2
+...     updatedAt: datetimestr
 ...     createdAt: datetimestr
 ...     deleted: bool
 ...     source: str
