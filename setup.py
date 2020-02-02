@@ -20,4 +20,8 @@ setup(
         "dataclasses;python_version<'3.7'",
         "typing_extensions;python_version<'3.8'",
     ],
+    extras_require={
+        'tests': ['requests', 'dataclass;python_version<="3.6"'],
+    },
+    test_suite="resguard",
 )
