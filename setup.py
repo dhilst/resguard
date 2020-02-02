@@ -17,6 +17,7 @@ setup(
     long_description_content_type="text/markdown",
     license="Apache-2.0",
     install_requires=[
-        'dataclasses;python_version<=3.6'
+        'dataclasses;python_version<3.7',
+        'typing_extensions;python_version<3.8',
     ]
 )
