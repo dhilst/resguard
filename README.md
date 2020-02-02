@@ -1,4 +1,8 @@
-This module provides function for parsing requests based on
+
+resguard
+========
+
+This module provides function for parsing response data, based on
 dataclass defined schemas.
 
 The user define arbitrary schema using dataclass. One dataclass
@@ -12,72 +16,114 @@ can refer to others to represent nested structures.
 >>> @dataclass
 ... class Bar:
 ...     foo: Foo
+
 ```
-While made with parsing json decoded data from REST requests, the approach
+
+While made with parsing json decoded data from REST responses in mind, the approach
 is pretty generic and may work for other use cases.
 
-So suppose that you're in charging to do another API client, yeah, yeah, ..
-I know, again, one more time ... do requests, get data, transform in something
-manageable and the save on database, or, whatever .. if you started doing this
-once you know that you'll gona work with JSON and that JSON become plain dicts
-and lists in python, and many people work just with dicts and lists and everything
-is okay, up to when you lose the track of these objects and start to spread KeyError
-and IndexError all over the codebase.
+So suppose that you're in charging to do another API client.. if you started doing this
+once you know that you'll gonna work with JSON and that JSON become plain dicts
+and lists in python, it's easy to lose the track of these objects and start
+to spread KeyError and IndexError handlers all over the codebase.
 
-It became usual to me to write representation of the responses as objects and
+It became usual to me to write representation of the response data as objects and
 instantiating these objects, and with objects I can have some type checking, mutch
-better than with dicts...
+better than with dicts... and can track what the fields
 
 But writing ad-hoc classes and parsers from dict -> myobject became boring
-too.. but I got some generic way of doing this based on dataclasses!! This is
-much more declarative and type checking friendly
+too.. so I created this! Much more declarative and type checking friendly
 
 So let's write an API to cat facts, we can find the docs here
 https://alexwohlbruck.github.io/cat-facts/docs/endpoints/facts.html
 
-Now the have this response:
+We're implementing the /facts/random endpoint. The documentation said that it will
+respond like this:
 
-{'used': False, 'source': 'user', 'type': 'cat', 'deleted': False, '_id': '5a4bfc91b0810f0021748b92', 'updatedAt': '2020-01-02T02:02:48.612Z', 'createdAt':
-'2018-01-21T21:20:02.814Z', 'user': '5a9ac18c7478810ea6c06381', 'text': 'Blackie became the richest cat in history when he inherited 15 million British Pounds
-.', '__v': 0, 'status': {'verified': True, 'sentCount': 1}}
+```json
+	{
+		"_id": "591f9894d369931519ce358f",
+		"__v": 0,
+		"text": "A female cat will be pregnant for approximately 9 weeks - between 62 and 65 days from conception to delivery.",
+		"updatedAt": "2018-01-04T01:10:54.673Z",
+		"deleted": false,
+		"source": "api",
+		"used": false
+	}
+```
 
 So is a list of facts, a fact can be defined like this
 
 ```python
 >>> from datetime import datetime
 >>> @dataclass
-... class Status:
-...     verified: bool
-...     sentCount: int
->>>
->>> @dataclass
 ... class Fact:
 ...     _id: str
 ...     __v: int
+...     text: str
 ...     updatedAt: datetime
-...     createdAt: datetime
 ...     deleted: bool
 ...     source: str
 ...     used: bool
-...     type: str
-...     user: str
-...     text: str
-...     status: Status
 
+```
 
+To parse a respone you call `parse_dc`, where `dc` stands for dataclass. You call it
+with the dataclass and the response data:
+
+```python
 >>> import requests as r
 >>> url = "https://cat-fact.herokuapp.com"
 >>> res = r.get(f"{url}/facts/random")
 >>> parse_dc(Fact, res.json())
 Traceback (most recent call last):
 ...
-TypeError:  in dataclass Fact while trying to construct value from datetime...
+TypeError: Unknow field type for Fact. Expected one of (_id,_Fact__v,text,updatedAt,deleted,source,used)
+
 ```
 
-Well, for a dataclass field `F: T` and value `V`, parse_dc will call `T(V)` at
-somepoint. So is important that construtors can work with data that came from request,
-but also we don't want to not lose typechecking. The solution here
-is to wrap the problematic object in a class and override its constructor
+What happens here is that the documentation is outdated, there are a type field that was not expected
+in response. `parse_dc` raise a TypeError if anything goes out of rails. Let's see in response what we
+have in `type` field
+```python
+>>> type_ = res.json()['type']
+>>> type_, type(type_)
+('cat', <class 'str'>)
+
+```
+
+So let's update our `Fact` definition
+
+```python
+>>> @dataclass
+... class Fact:
+...     _id: str
+...     __v: int
+...     text: str
+...     updatedAt: datetime
+...     deleted: bool
+...     source: str
+...     used: bool
+...     type: str # <- we added this
+
+```
+
+And parse again
+
+```python
+>>> parse_dc(Fact, res.json())
+Traceback (most recent call last):
+...
+TypeError:  in dataclass Fact while trying to construct value from datetime...
+
+```
+
+Know it stopped in `updatedAt: datetime`..  Well, for a dataclass field `F: T`
+and value `V`, parse_dc will call `T(V)` at somepoint. So is important that
+construtors can work with data that came from the response, but also we don't want
+to lose typechecking. The solution here is to wrap the problematic object in a
+class and override its constructor. I override `__new__` instead of `__init__`
+here because I want to control the returned object not how it's initializated.
 
 ```python
 >>> class datetimestr(datetime):
@@ -85,7 +131,7 @@ is to wrap the problematic object in a class and override its constructor
 ...         return datetime.strptime(datestr, "%Y-%m-%dT%H:%M:%S.%fZ")
 
 >>> @dataclass
-... class Fact2:
+... class Fact:
 ...     _id: str
 ...     __v: int
 ...     updatedAt: datetimestr
@@ -96,14 +142,62 @@ is to wrap the problematic object in a class and override its constructor
 ...     type: str
 ...     user: str
 ...     text: str
-...     status: Status
 ...
->>> parse_dc(Fact2, res.json())
-Fact2(...)
-```
-And it works!
+>>> parse_dc(Fact, res.json())
+Traceback (most recent call last):
+...
+TypeError: Unknow field status for Fact. ...
 
-To avoid the class ... __new__ boilerplate is possible to use the create_base
+```
+
+Oh no, another missing field. While I write this tutorial, we just got
+two outdated fields... this is why the library is called resguard. It's
+an abbreviation for response guard, it guard you from dealing to bad responses
+all over your code... Back to the tutorial, let't see what we have in `status`
+field:
+
+```python
+>>> res.json()['status']
+{'verified': True, 'sentCount': 1}
+
+```
+
+So it's a dictionary, let's create another dataclass to represent this
+and update our `Facts` dataclass to include status field
+
+```python
+>>> @dataclass
+... class Status:
+...     verified: bool
+...     sentCount: int
+
+>>> @dataclass
+... class Fact:
+...     _id: str
+...     __v: int
+...     updatedAt: datetimestr
+...     createdAt: datetimestr
+...     deleted: bool
+...     source: str
+...     used: bool
+...     type: str
+...     user: str
+...     text: str
+...     status: Status # <- we added this
+
+```
+
+Here we go again
+
+```python
+>>> parse_dc(Fact, res.json())
+Fact(_id=..., _Fact__v=..., updatedAt=..., createdAt=..., deleted=..., source=..., used=..., type='cat', user=..., text=..., status=Status(verified=True, sentCount=1))
+
+```
+
+And it worked!
+
+To avoid the class boilerplate is possible to use the `@create_base`
 decorator, it takes a function and replaces it by a class which is subclass of
 the sole argument
 
@@ -113,16 +207,19 @@ So you can replace this
 >>> class datetimestr(datetime):
 ...     def __new__(cls, datestr):
 ...         return datetime.strptime(datestr, "%Y-%m-%dT%H:%M:%S.%fZ")
+
 ```
 
 by this
 ```python
 >>> @create_base(datetime)
-... def date_br(s):
+... def datetimestr(s):
 ...     return datetime.strptime(s, r"%d/%m/%Y")
+
 ```
 
-Since date_br is a subtype of datetime it typechecks for datetime
+Since datetimestr is a subtype of datetime it typechecks for datetime
+
 
 # parse_dc
 
@@ -146,19 +243,23 @@ to parse.
 ...     foo: Dict[str, int]
 ...     Foo: Foo
 ...     age: Optional[int] = None
+
 ```
 
 Now suppose that you get this data from a network response. I'm
 expecting it to be plain json parsed to dicts, lists and so on,
 but no objects, just decoded json:
+
 ```python
 >>> data = {"foo": {"bar": 1}, "l": [], "Foo": {"name": 1}}
+
 ```
 
 Hmm, it seems to match, lets try to parse this
 ```python
 >>> parse_dc(Bar, data)
 Bar(l=[], foo={'bar': 1}, Foo=Foo(name=1), age=None)
+
 ```
 
 You can see that it creates nested dataclasses too, cool. But this
@@ -170,6 +271,7 @@ Let's change data, and see how parse_dc handle errors
 Traceback (most recent call last):                                           
 ...
 TypeError: Unknow field badkey for Bar. Expected one of (l,foo,Foo,age)
+
 ```
 
 Hmm... interesting... It knows that badkey is not in Bar dataclass
@@ -183,6 +285,7 @@ definition and it shows what are the expected keys. Let's try another thing
 Traceback (most recent call last):
 ...
 TypeError: in dataclass Foo, 'an string' is not int: invalid literal for int() with base 10: 'an string'
+
 ```
 
 So I passed a bad (by little margin) value in "foo" key. It expects an int
@@ -197,6 +300,7 @@ Now if it uses the dataclass field type as constructor, this works
 ...     foo: str 
 >>> parse_dc(Foo, {"foo": 1}).foo
 '1'
+
 ```
 
 It works because str(1) just .. works .. So think about str as the Any type
@@ -204,7 +308,7 @@ from typing module. Almost anything can be encoded as string, so take care
 of yours, since they point to holes on type checking, but provide a nice
 generic system
 
-# @create_base
+# create_base
 
 A function decorator. It replace the function by a class
 which call the decorated function in its new method, for
@@ -219,11 +323,12 @@ example
 True
 >>> date_br("01/01/2001")
 datetime.datetime(2001, 1, 1, 0, 0)
+
 ```
 
 # unpack_union
 
-Takes an Union and return another union with the same arguments
+Takes an Unin and return another union with the same arguments
 as input, but with None and Any filtered
 
 ```python
@@ -232,12 +337,14 @@ as input, but with None and Any filtered
 
 >>> unpack_union(List[str])
 <class 'str'>
+
 ```
 
 It respect concrete types
 ```python
 >>> unpack_union(int)
 <class 'int'>
+
 ```
 
 If the input is a literal, it returns itself. Literals are types
@@ -247,4 +354,11 @@ and values at same time, like enums
 1
 >>> unpack_union([1,2])
 [1, 2]
+
 ```
+
+# Dataclass
+
+Dataclass static type
+https://stackoverflow.com/a/55240861/652528
+
