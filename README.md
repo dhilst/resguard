@@ -1,3 +1,4 @@
+[![Build Status](https://travis-ci.org/dhilst/resguard.svg?branch={branch})](https://travis-ci.org/dhilst/resguard)
 
 resguard
 ========
@@ -65,11 +66,12 @@ So is a list of facts, a fact can be defined like this
 ...     deleted: bool
 ...     source: str
 ...     used: bool
+...     user: Optional[str]
 
 ```
 
-To parse a respone you call `parse_dc`, where `dc` stands for dataclass. You call it
-with the dataclass and the response data:
+To parse a respone you call `parse_dc`, where `dc` stands for dataclass. You
+call it with the dataclass and the response data:
 
 ```python
 >>> import requests as r
@@ -78,18 +80,33 @@ with the dataclass and the response data:
 >>> parse_dc(Fact, res.json())
 Traceback (most recent call last):
 ...
-TypeError: Unknow field type for Fact. Expected one of (_id,_Fact__v,text,updatedAt,deleted,source,used)
+TypeError: Unknow field type for Fact. Expected one of (_id,_Fact__v,text,updatedAt,deleted,source,used,user)
 
 ```
 
-What happens here is that the documentation is outdated, there are a type field that was not expected
-in response. `parse_dc` raise a TypeError if anything goes out of rails. Let's see in response what we
-have in `type` field
+You may notice that I put a `user: Optional[str]` on the `Fact` definition too.
+This is how you express optional fields, that may or may not be present on
+response. Missing optinal fields become `None` in dataclass
+
+What happens here is that the documentation is outdated, there are a type field
+that was not expected in response. `parse_dc` raise a TypeError if anything
+goes out of rails. Let's see in response what we have in `type` field
 ```python
 >>> type_ = res.json()['type']
 >>> type_, type(type_)
 ('cat', <class 'str'>)
 
+```
+
+This may happen again and again. Some APIs are freaking crazy, they may add
+some fields in some responses and another not. If you pass
+`,ignore_unknows=True)` to `parse_dc` it will not raise type errors if an
+unexpected field arrives. If you want this behavior by default you can memoise
+`parse_dc` as
+
+```python
+from functools import partial
+parse_dc = partial(parse_dc, ignore_unknows=True)
 ```
 
 So let's update our `Fact` definition
@@ -104,6 +121,7 @@ So let's update our `Fact` definition
 ...     deleted: bool
 ...     source: str
 ...     used: bool
+...     user: Optional[str]
 ...     type: str # <- we added this
 
 ```
@@ -140,7 +158,7 @@ here because I want to control the returned object not how it's initializated.
 ...     source: str
 ...     used: bool
 ...     type: str
-...     user: str
+...     user: Optional[str]
 ...     text: str
 ...
 >>> parse_dc(Fact, res.json())
