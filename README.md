@@ -238,6 +238,24 @@ by this
 
 Since datetimestr is a subtype of datetime it typechecks for datetime.
 
+You may ask me:
+- This is all cool but, it may be slow, how can I disable typechecking
+while handle requests in production?
+
+In this case you can use `parse_dc_fast` which will skip all typecheckings,
+and just return the nested dataclass. Here is an example
+
+```python
+>>> fact = parse_dc_fast(Fact, res.json())
+>>> fact
+Fact(...)
+>>> type(fact.createdAt)
+<class 'str'>
+
+As you can see the constructor is not called in this case `fact.createAt` remains
+as a string. Which is bad, but it should show a more linear performance.
+```
+
 Now what if we want go to the oposite direction, given somejson, construct
 a dataclass. Well resguard can be invoked as `curl something | python -m resguard fromjson`
 and it will output a dataclass definition for that JSON.

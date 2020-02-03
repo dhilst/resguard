@@ -237,6 +237,24 @@ by this
 
 Since datetimestr is a subtype of datetime it typechecks for datetime.
 
+You may ask me:
+- This is all cool but, it may be slow, how can I disable typechecking
+while handle requests in production?
+
+In this case you can use `parse_dc_fast` which will skip all typecheckings,
+and just return the nested dataclass. Here is an example
+
+```python
+>>> fact = parse_dc_fast(Fact, res.json())
+>>> fact
+Fact(...)
+>>> type(fact.createdAt)
+<class 'str'>
+
+As you can see the constructor is not called in this case `fact.createAt` remains
+as a string. Which is bad, but it should show a more linear performance.
+```
+
 Now what if we want go to the oposite direction, given somejson, construct
 a dataclass. Well resguard can be invoked as `curl something | python -m resguard fromjson`
 and it will output a dataclass definition for that JSON.
@@ -649,6 +667,58 @@ def fromjson(dcname: str, jsondata: str):
     before calling fromdict
     """
     return fromdict(dcname, json.loads(jsondata))
+
+
+def parse_dc_fast(dc, data):
+    """
+    This is a fast version of parse_dc. It don't type checks,
+    just instantiate the dataclasses recursively. Just note that
+    dataclass don't check at runtime too, so, this doesn't typecheck
+    but it works at runtime
+
+    >>> from dataclasses import dataclass, asdict
+    >>> @dataclass
+    ... class Foo:
+    ...     foo: str
+    ...     __bar: str
+    >>> asdict(Foo(foo=1, _Foo__bar=1))
+    {'foo': 1, '_Foo__bar': 1}
+    
+    But mypy will detect the `foo=1` there.
+
+    Let's parse something :-)
+    ```python
+    >>> from enum import Enum
+    >>> FooEnum = Enum("FooEnum", "foo bar")
+    >>> 
+    >>> @dataclass
+    ... class Bar:
+    ...     bar: str
+    >>> 
+    >>> @dataclass
+    ... class Foo:
+    ...     foo: str
+    ...     bar: Bar
+    >>> parse_dc_fast(Foo, {"foo": "foo", "num": 1, "bar": {"bar": "bar"}})
+    Foo(foo='foo', bar=Bar(bar='bar'))
+
+    ```
+    """
+    flds = {f.name: f.type for f in fields(dc)}
+    cpy = data.copy()
+    for k, v in data.items():
+        if k not in flds.keys():
+            if k.startswith('__'):
+                new_k = f"_{dc.__name__}{k}"
+                cpy[new_k] = v
+                del cpy[k]
+                k = new_k
+            else:
+                del cpy[k]
+                continue
+        if is_dataclass(flds[k]):
+            cpy[k] = parse_dc_fast(flds[k], v)
+    return dc(**cpy)
 
 
 if __name__ == "__main__":
