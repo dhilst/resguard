@@ -16,6 +16,7 @@ setup(
     long_description=README,
     long_description_content_type="text/markdown",
     license="Apache-2.0",
+    url="https://github.com/dhilst/resguard",
     install_requires=[
         "dataclasses;python_version<'3.7'",
         "typing_extensions;python_version<'3.8'",
