@@ -8,10 +8,7 @@ sys.path.append(BASE_PATH)
 import resguard
 from subprocess import check_output
 
-branch = check_output(f"git -C {BASE_PATH} rev-parse --abbrev-ref HEAD", shell=True, universal_newlines=True).rsplit()
-
-
-print("[![Build Status](https://travis-ci.org/dhilst/resguard.svg?branch={branch})](https://travis-ci.org/dhilst/resguard)")
+print("[![Build Status](https://travis-ci.org/dhilst/resguard.svg?branch=master)](https://travis-ci.org/dhilst/resguard)")
 print(resguard.__doc__)
 print()
 for func in 'parse_dc create_base unpack_union Dataclass'.split():

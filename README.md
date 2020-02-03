@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/dhilst/resguard.svg?branch={branch})](https://travis-ci.org/dhilst/resguard)
+[![Build Status](https://travis-ci.org/dhilst/resguard.svg?branch=master)](https://travis-ci.org/dhilst/resguard)
 
 resguard
 ========
