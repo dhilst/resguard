@@ -6,5 +6,5 @@ python:
 # command to install dependencies
 script:
   - python3 setup.py install
-  - python3 -m resguard
+  - python3 -m resguard test
 
