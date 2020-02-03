@@ -235,14 +235,36 @@ by this
 
 ```
 
-Since datetimestr is a subtype of datetime it typechecks for datetime
+Since datetimestr is a subtype of datetime it typechecks for datetime.
+
+Now what if we want go to the oposite direction, given somejson, construct
+a dataclass. Well resguard can be invoked as `curl something | python -m resguard fromjson`
+and it will output a dataclass definition for that JSON.
+
+The type inference is pretty simple, but it is already better than writing all
+that dataclasses by rand. Let's see it in action
+
+```python
+>>> print(print_dc(fromjson("Root", '{"foo": "foo", "bar": { "bar": "bar" }}')))
+@dataclass
+class bar:
+   bar: str
+<BLANKLINE>
+<BLANKLINE>
+@dataclass
+class Root:
+   foo: str
+   bar: bar
+<BLANKLINE>
 """
 
+from io import StringIO
 import logging
+import json
 import re
 from typing import *
 from ast import literal_eval
-from dataclasses import dataclass, fields, is_dataclass
+from dataclasses import dataclass, fields, is_dataclass, make_dataclass
 
 try:
     from typing_extensions import Protocol, Literal
@@ -510,7 +532,109 @@ def parse_dc(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
         ) from e
 
 
+_created_dataclasses = {}
+
+
+def create_dc(dcname: str, fields):
+    """
+    >>> from dataclasses import is_dataclass, fields, asdict
+    >>> Foo = create_dc("Foo", (("foo", str),) )
+    >>> Foo.__name__
+    'Foo'
+    >>> is_dataclass(Foo)
+    True
+    >>> asdict(Foo(foo="foo"))
+    {'foo': 'foo'}
+    """
+    dc = make_dataclass(dcname, fields)
+    _created_dataclasses[dcname] = dc
+    return dc
+
+
+def fromdict(dcname: str, data: dict):
+    """
+    >>> from dataclasses import fields
+    >>> Foo = fromdict("Foo", {"foo": "foo", "bar": {"bar": "bar"}})
+    >>> [f.type.__name__ for f in fields(Foo)]
+    ['str', 'bar']
+    """
+    dc_fields = []
+    scalar = (int, float, bool, str)
+    for k, v in data.items():
+        if isinstance(v, dict):
+            dc_fields.append((k, fromdict(k, v)))
+        elif isinstance(v, list):
+            if len(v) == 0:
+                dc_fields.append((k, List[Any]))
+            elif len(set(map(type, v))) == 1:
+                dc_fields.append((k, List[type(v[0])]))
+            else:
+                dc_fields.append((k, Tuple[tuple(map(type, v))]))
+        elif isinstance(v, scalar):
+            dc_fields.append((k, type(v)))
+    return create_dc(dcname, dc_fields)
+
+
+def print_dc(dcroot) -> str:
+    """
+    from dataclasses import dataclass
+    >>> @dataclass
+    ... class Bar:
+    ...     bar: str
+    >>> @dataclass
+    ... class Foo:
+    ...     foo: str
+    ...     bar: Bar
+    >>> print(print_dc(Foo))
+    @dataclass
+    class Bar:
+       bar: str
+    <BLANKLINE>
+    <BLANKLINE>
+    @dataclass
+    class Foo:
+       foo: str
+       bar: Bar
+    <BLANKLINE>
+    """
+    s = StringIO()
+    s.write("@dataclass\n")
+    s.write(f"class {dcroot.__name__}:\n")
+    fields_ = {f.name: f.type for f in fields(dcroot)}
+    for name, type_ in fields_.items():
+        if is_dataclass(type_):
+            new_dc = print_dc(type_)
+            new_s = StringIO()
+            new_s.write(new_dc)
+            new_s.write("\n\n")
+            new_s.write(s.getvalue())
+            s = new_s
+        s.write(f"   {name}: {type_.__name__}\n")
+    return s.getvalue()
+
+
+def fromjson(dcname: str, jsondata: str):
+    """
+    Just a helper, it calls json.loads on jsondata
+    before calling fromdict
+    """
+    return fromdict(dcname, json.loads(jsondata))
+
+
 if __name__ == "__main__":
     import doctest
+    import sys
 
-    doctest.testmod(optionflags=doctest.ELLIPSIS)
+    try:
+        arg1 = sys.argv[1]
+    except IndexError:
+        print(f"Usage: python -m resguard {{fromjson [dcname]|test}}", file=sys.stderr)
+        sys.exit(1)
+    if arg1 == "test":
+        doctest.testmod(optionflags=doctest.ELLIPSIS)
+    elif arg1 == "fromjson":
+        try:
+            arg2 = sys.argv[2]
+        except IndexError:
+            arg2 = "Root"
+        print(print_dc(fromjson(arg2, sys.stdin.read())))
