@@ -256,6 +256,8 @@ class Root:
    foo: str
    bar: bar
 <BLANKLINE>
+
+```
 """
 
 from io import StringIO
