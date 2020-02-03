@@ -236,7 +236,27 @@ by this
 
 ```
 
-Since datetimestr is a subtype of datetime it typechecks for datetime
+Since datetimestr is a subtype of datetime it typechecks for datetime.
+
+Now what if we want go to the oposite direction, given somejson, construct
+a dataclass. Well resguard can be invoked as `curl something | python -m resguard fromjson`
+and it will output a dataclass definition for that JSON.
+
+The type inference is pretty simple, but it is already better than writing all
+that dataclasses by rand. Let's see it in action
+
+```python
+>>> print(print_dc(fromjson("Root", '{"foo": "foo", "bar": { "bar": "bar" }}')))
+@dataclass
+class bar:
+   bar: str
+<BLANKLINE>
+<BLANKLINE>
+@dataclass
+class Root:
+   foo: str
+   bar: bar
+<BLANKLINE>
 
 
 # parse_dc
