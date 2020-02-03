@@ -10,7 +10,7 @@ setup(
     name="resguard",
     author="Daniel Hilst Selli",
     author_email="danielhilst@gmail.com",
-    version="0.12",
+    version="0.13",
     py_modules=["resguard"],
     python_requires=">=3.6",
     long_description=README,
