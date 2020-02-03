@@ -19,17 +19,17 @@ can refer to others to represent nested structures.
 
 ```
 
-While made with parsing json decoded data from REST responses in mind, the approach
-is pretty generic and may work for other use cases.
+While made with parsing json decoded data from REST responses in mind, the
+approach is pretty generic and may work for other use cases.
 
-So suppose that you're in charging to do another API client.. if you started doing this
-once you know that you'll gonna work with JSON and that JSON become plain dicts
-and lists in python, it's easy to lose the track of these objects and start
-to spread KeyError and IndexError handlers all over the codebase.
+So suppose that you're in charging to do another API client.. if you started
+doing this once you know that you'll gonna work with JSON and that JSON become
+plain dicts and lists in python, it's easy to lose the track of these objects
+and start to spread KeyError and IndexError handlers all over the codebase.
 
-It became usual to me to write representation of the response data as objects and
-instantiating these objects, and with objects I can have some type checking, mutch
-better than with dicts... and can track what the fields
+It became usual to me to write representation of the response data as objects
+and instantiating these objects, and with objects I can have some type
+checking, mutch better than with dicts... and can track what the fields
 
 But writing ad-hoc classes and parsers from dict -> myobject became boring
 too.. so I created this! Much more declarative and type checking friendly
@@ -37,8 +37,8 @@ too.. so I created this! Much more declarative and type checking friendly
 So let's write an API to cat facts, we can find the docs here
 https://alexwohlbruck.github.io/cat-facts/docs/endpoints/facts.html
 
-We're implementing the /facts/random endpoint. The documentation said that it will
-respond like this:
+We're implementing the /facts/random endpoint. The documentation said that it
+will respond like this:
 
 ```json
 	{
@@ -242,7 +242,7 @@ a dataclass. Well resguard can be invoked as `curl something | python -m resguar
 and it will output a dataclass definition for that JSON.
 
 The type inference is pretty simple, but it is already better than writing all
-that dataclasses by rand. Let's see it in action
+that dataclasses by hand. Let's see it in action
 
 ```python
 >>> print(print_dc(fromjson("Root", '{"foo": "foo", "bar": { "bar": "bar" }}')))
@@ -258,6 +258,34 @@ class Root:
 <BLANKLINE>
 
 ```
+
+To use it from command line (much simpler)
+```shell
+curl -s https://cat-fact.herokuapp.com/facts/random | python -m resguard fromjson
+@dataclass
+class status:
+   verified: bool
+   sentCount: int
+
+
+@dataclass
+class Root:
+   used: bool
+   source: str
+   type: str
+   deleted: bool
+   _id: str
+   __v: int
+   text: str
+   updatedAt: str
+   createdAt: str
+   status: status
+   user: str
+
+
+```
+
+That's it, check below for function docs
 """
 
 from io import StringIO
