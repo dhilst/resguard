@@ -79,7 +79,7 @@ call it with the dataclass and the response data:
 >>> parse_dc(Fact, res.json())
 Traceback (most recent call last):
 ...
-TypeError: Unknow field type for Fact. Expected one of (_id,_Fact__v,text,updatedAt,deleted,source,used,user)
+TypeError: Unknow field type for Fact(_id,_Fact__v,text,updatedAt,deleted,source,used,user)
 
 ```
 
@@ -97,15 +97,15 @@ goes out of rails. Let's see in response what we have in `type` field
 
 ```
 
-This may happen again and again. Some APIs are freaking crazy, they may add
-some fields in some responses and another not. If you pass
-`,ignore_unknows=True)` to `parse_dc` it will not raise type errors if an
-unexpected field arrives. If you want this behavior by default you can memoise
-`parse_dc` as
+We do not want that our software breaks because the API put a brand new
+field in the response. You can ignore unknow fields by passing `strict=False`
+to `parse_dc`. If you want this by default you can memoise the parse_dc like
+below:
 
 ```python
-from functools import partial
-parse_dc = partial(parse_dc, ignore_unknows=True)
+>>> from functools import partial
+>>> parse_dc = partial(parse_dc, strict=False)
+
 ```
 
 So let's update our `Fact` definition
@@ -125,136 +125,47 @@ So let's update our `Fact` definition
 
 ```
 
-And parse again
-
+And parse again. This time it works, but it's doesn't properly initialize the
+dataclasses fields. Well, dataclass don't do runtime type checking. 
 ```python
->>> parse_dc(Fact, res.json())
-Traceback (most recent call last):
-...
-TypeError:  in dataclass Fact while trying to construct value from datetime...
-
-```
-
-Know it stopped in `updatedAt: datetime`..  Well, for a dataclass field `F: T`
-and value `V`, parse_dc will call `T(V)` at somepoint. So is important that
-construtors can work with data that came from the response, but also we don't want
-to lose typechecking. The solution here is to wrap the problematic object in a
-class and override its constructor. I override `__new__` instead of `__init__`
-here because I want to control the returned object not how it's initializated.
-
-```python
->>> class datetimestr(datetime):
-...     def __new__(cls, datestr):
-...         return datetime.strptime(datestr, "%Y-%m-%dT%H:%M:%S.%fZ")
-
->>> @dataclass
-... class Fact:
-...     _id: str
-...     __v: int
-...     updatedAt: datetimestr
-...     createdAt: datetimestr
-...     deleted: bool
-...     source: str
-...     used: bool
-...     type: str
-...     user: Optional[str]
-...     text: str
-...
->>> parse_dc(Fact, res.json())
-Traceback (most recent call last):
-...
-TypeError: Unknow field status for Fact. ...
-
-```
-
-Oh no, another missing field. While I write this tutorial, we just got
-two outdated fields... this is why the library is called resguard. It's
-an abbreviation for response guard, it guard you from dealing to bad responses
-all over your code... Back to the tutorial, let't see what we have in `status`
-field:
-
-```python
->>> res.json()['status']
-{'verified': True, 'sentCount': 1}
-
-```
-
-So it's a dictionary, let's create another dataclass to represent this
-and update our `Facts` dataclass to include status field
-
-```python
->>> @dataclass
-... class Status:
-...     verified: bool
-...     sentCount: int
-
->>> @dataclass
-... class Fact:
-...     _id: str
-...     __v: int
-...     updatedAt: datetimestr
-...     createdAt: datetimestr
-...     deleted: bool
-...     source: str
-...     used: bool
-...     type: str
-...     user: str
-...     text: str
-...     status: Status # <- we added this
-
-```
-
-Here we go again
-
-```python
->>> parse_dc(Fact, res.json())
-Fact(_id=..., _Fact__v=..., updatedAt=..., createdAt=..., deleted=..., source=..., used=..., type='cat', user=..., text=..., status=Status(verified=True, sentCount=1))
-
-```
-
-And it worked!
-
-To avoid the class boilerplate is possible to use the `@create_base`
-decorator, it takes a function and replaces it by a class which is subclass of
-the sole argument
-
-So you can replace this
-
-```python
->>> class datetimestr(datetime):
-...     def __new__(cls, datestr):
-...         return datetime.strptime(datestr, "%Y-%m-%dT%H:%M:%S.%fZ")
-
-```
-
-by this
-```python
->>> @create_base(datetime)
-... def datetimestr(s):
-...     return datetime.strptime(s, r"%d/%m/%Y")
-
-```
-
-Since datetimestr is a subtype of datetime it typechecks for datetime.
-
-You may ask me:
-- This is all cool but, it may be slow, how can I disable typechecking
-while handle requests in production?
-
-In this case you can use `parse_dc_fast` which will skip all typecheckings,
-and just return the nested dataclass. Here is an example
-
-```python
->>> fact = parse_dc_fast(Fact, res.json())
->>> fact
+>>> dc = parse_dc(Fact, res.json())
+>>> dc  
 Fact(...)
->>> type(fact.createdAt)
+>>> type(dc.updatedAt)
 <class 'str'>
 
-As you can see the constructor is not called in this case `fact.createAt` remains
-as a string. Which is bad, but it should show a more linear performance.
 ```
 
+If you pass it a string, it doens't matter if the field type says datetime,
+constructor will put the string there and it's done. But the standard library
+provides a way to handle this. You need to provide an `__post_init__` method.
+It will not receive any arguments and it.s called by constructor after
+initializing self.
+
+```python
+>>> @dataclass
+... class Fact:
+...     _id: str
+...     __v: int
+...     text: str
+...     updatedAt: datetime
+...     deleted: bool
+...     source: str
+...     used: bool
+...     user: Optional[str]
+...     type: str
+...
+...     def __post_init__(self):
+...         if isinstance(self.updatedAt, str):
+...             self.updatedAt = datetime.strptime(self.updatedAt, "%Y-%m-%dT%H:%M:%S.%fZ")
+
+>>> dc = parse_dc(Fact, res.json())
+>>> dc 
+Fact(...)
+>>> type(dc.updatedAt)
+<class 'datetime.datetime'>
+
+```
 Now what if we want go to the oposite direction, given somejson, construct
 a dataclass. Well resguard can be invoked as `curl something | python -m resguard fromjson`
 and it will output a dataclass definition for that JSON.
@@ -322,6 +233,8 @@ except ImportError:
 T = TypeVar("T")
 
 log = logging.getLogger(__name__)
+if __debug__:
+    log.setLevel(logging.DEBUG)
 
 
 class Dataclass(Protocol):
@@ -402,7 +315,7 @@ def unpack_union(union: Union[T, Any, None]) -> T:
         return union
 
 
-def parse_dc(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
+def parse_dc_typecheck(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
     """
     Given an arbitrary dataclass and a dict this function will
     recursively parse the data, checking data types against cls
@@ -438,7 +351,7 @@ def parse_dc(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
 
     Hmm, it seems to match, lets try to parse this
     ```python
-    >>> parse_dc(Bar, data)
+    >>> parse_dc_typecheck(Bar, data)
     Bar(l=[], foo={'bar': 1}, Foo=Foo(name=1), age=None)
 
     ```
@@ -448,7 +361,7 @@ def parse_dc(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
     Let's change data, and see how parse_dc handle errors
     ```python
     >>> data["badkey"] = "bad things"
-    >>> parse_dc(Bar, data)
+    >>> parse_dc_typecheck(Bar, data)
     Traceback (most recent call last):                                           
     ...
     TypeError: Unknow field badkey for Bar. Expected one of (l,foo,Foo,age)
@@ -462,7 +375,7 @@ def parse_dc(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
     >>> @dataclass
     ... class Foo:
     ...     foo: int
-    >>> parse_dc(Foo, {"foo": "an string"})
+    >>> parse_dc_typecheck(Foo, {"foo": "an string"})
     Traceback (most recent call last):
     ...
     TypeError: in dataclass Foo, 'an string' is not int: invalid literal for int() with base 10: 'an string'
@@ -479,7 +392,7 @@ def parse_dc(cls: Dataclass, data: dict, ignore_unknows=False) -> Dataclass:
     >>> @dataclass
     ... class Foo:
     ...     foo: str 
-    >>> parse_dc(Foo, {"foo": 1}).foo
+    >>> parse_dc_typecheck(Foo, {"foo": 1}).foo
     '1'
    
     ```
@@ -669,11 +582,12 @@ def fromjson(dcname: str, jsondata: str):
     return fromdict(dcname, json.loads(jsondata))
 
 
-def parse_dc_fast(dc, data):
+def parse_dc(dc, data, strict=True):
     """
-    This is a fast version of parse_dc. It don't type checks,
-    just instantiate the dataclasses recursively. Just note that
-    dataclass don't check at runtime too, so, this doesn't typecheck
+    Build tree of dataclasses initialized with data
+
+    It don't type checks, just instantiate the dataclasses recursively. Just
+    note that dataclass don't check at runtime too, so, this doesn't typecheck
     but it works at runtime
 
     >>> from dataclasses import dataclass, asdict
@@ -699,8 +613,23 @@ def parse_dc_fast(dc, data):
     ... class Foo:
     ...     foo: str
     ...     bar: Bar
-    >>> parse_dc_fast(Foo, {"foo": "foo", "num": 1, "bar": {"bar": "bar"}})
+    >>> parse_dc(Foo, {"foo": "foo", "num": 1, "bar": {"bar": "bar"}})
     Foo(foo='foo', bar=Bar(bar='bar'))
+
+    >>> from datetime import datetime
+    >>> @dataclass
+    ... class Date:
+    ...     d: datetime
+    >>> Date(d="20010101T00:00Z").d
+    20010101T00:00Z
+    >>> @dataclass
+    ... class Date:
+    ...     d: datetime
+    ...     def __post_init__(self):
+    ...         if isinstance(self.d, str):
+    ...             self.d = datetime.strptime("%Y%m%dT%H%MZ")
+    >>> Date(d="20010101T00:00Z").d
+
 
     ```
     """
@@ -708,16 +637,22 @@ def parse_dc_fast(dc, data):
     cpy = data.copy()
     for k, v in data.items():
         if k not in flds.keys():
-            if k.startswith('__'):
+            if k.startswith("__"):
                 new_k = f"_{dc.__name__}{k}"
                 cpy[new_k] = v
                 del cpy[k]
                 k = new_k
             else:
+                log.warn(f"Unknow field {k}={v} for {dc.__name__}")
+                if strict:
+                    fields_ = ",".join([
+                        f"{t.name}" for t in fields(dc)
+                    ])
+                    raise TypeError(f"Unknow field {k} for {dc.__name__}({fields_})")
                 del cpy[k]
                 continue
         if is_dataclass(flds[k]):
-            cpy[k] = parse_dc_fast(flds[k], v)
+            cpy[k] = parse_dc(flds[k], v)
     return dc(**cpy)
 
 
